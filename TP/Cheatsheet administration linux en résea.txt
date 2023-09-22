@@ -1,0 +1,89 @@
+ Cheatsheet administration linux en réseau
+ISCSI 
+Permet d’implémenter du stockage SAN en mode bloc (représentation binaire des fichier, permet d’accéder rapidement aux données), sur des hotes appartenant à un réseau TCP/IP.iSCSI implémente une technologie semblable avec fibre channel.
+On encapsule les commande SCSI dans les paquet IP transmis entre hote et unité de disque, iSCSI gère donc l’ordre d’émission et de réception des paquets qui peuvent être perdus.
+On établit une relation 1 à 1 entre un initiateur (client) et une cible (serveur)
+Connexions établies sur le port 3260
+
+LVM 
+
+Gestionnaire de périphérique en mode bloc au niveau systeme, permet de se passe du partionnement en créant des volumes facilement modifiables.
+Les volumes sont plus facilement modifiables car on ne prend pas en compte l’emplacement exact des données sur le disque.Permet aussi de faire des snapshot facilement, sans interruption du système.
+ !! Si le volume physique qui heberge les volumes logiques tombe, tous les volumes logiques sont perdus.=> on utilise donc la technologie RAID pour dupliquer ses volumes.
+iSCSI sur Linux
+
+Paquets de base : targetcli-fb et open-iscsi (pour l’initiateur)
+Le démon iscsid s’exécute sur lse ports 9837 et 9838. 
+
+Conf avec targetcli :
+La partie backstores contient les volumes de stockages à publier. On peut y retrouver des fichier locaux à faire coresspondre dans fileio et des unités physiques dans block. 
+On doit configurer la partie stockage local dans backstores, on utilisera la commande create blockvol[X] /dev/[volume].
+sudo targetcli ls cd backstores/block create blockvol /dev/vdb
+
+Une fois le stockage géré on doit mettre en place le portail qui permet de publier les cibles isci.On se rend donc dans la partie isci et on créé une nouvelle entité. Elle sera nommé avec un IQN sous la forme iqn.2003-01.org.linux-iscsi.target......
+
+(depuis la racine)
+cd iscsicd iqn......./tpg1/lunscreate 
+backstores/block/[nom du bloc cree]
+
+On doit ensuite associer le nouveau LUN à un portail, on publie le portail avec des adresses ipv4 et v6 en supprimant les configurations par défaut :
+
+Depuis le LUN du nouveau LUN
+cd ../portals
+delete 0.0.0.0 3260
+create ::0
+
+Lorsqu’on liste les entrée on est sensé voir apparaitre le portail sur l’adresse [::0] :3260
+
+Depuis l’initiator on test la disponiblité du portail sur la target avec iscsiadm :
+Sudo iscsiadm –m discovery —type sendtargets —portal=ipv4 ou [ipv6]
+
+On peut aussi tenter de se connecter, pour le moment il n’y pas de profil de connexion donc on ne peut pas lancer une nouvelle session : 
+Sudo iscsiadm –m node \ -T iqn...... \ -p ipv4 ou [ipv6] \ -l 
+P
+our permettre l’ouverture d’une session il va falloir ajouter  l’iqn de l’initator à la liste des clients pouvant contacter la target. On récupère cet iqn dans le fichier de configuration du paquet iscsi
+
+sudo cat /etc/iscsi/initiatorname.iscsi
+
+On ajoute le resultat de cette commande dans la liste des acls du targetcli sur la target :
+
+(depuis l’intérieur du portail)
+ cd aclscreate iqn.[.......]
+exit
+
+On peut relancer la commande de connexion qui va démarrer une session.
+
+Creation d’un volume RAID
+
+Le service qui permetde gérer des unités RAID se trouvedans le paquet mdadm.
+On va l’utiliser pour créer une unité logique RAID1 dans /dev/md0, cette unité sera composé de /dev/sda et /dev/vdb : 
+
+sudo mdadm —create /dev/md0  —level=raid1 —raid-device=2 /dev/sda /vdb
+
+
+On rend le montage permanent en akout le résultat de la commande sudo mdadm —detail —scan au fichier /etc/mdadm/mdadm.conf
+NFS
+
+Laversion 2 est faite pour partager des fichiers entre hôtes d’un même LAN. Pour cela elle se base sur des paquets UDP au niveau transport et sur RPC au niveau supérieur.
+Avec la version 4 on utilise désormais le port TCP 2049 toujours en utilisant des appels RPC mais avec des flux chiffrés.
+Configurer un client/serveur NFS
+Le client et le serveur doivent partager certains services pour implémenter NFS, notament RPC.
+Le paquet contenant le service de gestion RPC s’appelle RPCBIND, une fois installé on doit voir le service rpcbind s’exécuter en utilisant ps aux ou lsof –i et en envoyant le résultat dans un grep sur rpcbind . 
+
+
+
+MISC
+
+lsblk : permet d’afficher tous les périphériques de stockage en mode bloc
+
+parted : visualiser latable de partiion d’une unité de disque. Utilisation : sudo parted /dev/[unité] printVa afficher les différentes partitions de l’unité de stoclage
++ 
+dd : permet de copier, convertir et formater un fichier Utilisation : sudo dd if=/dev/zero of=/dev/[unité] bs=512 count=4 if donne le fichier source, ici un faux fichier zero et of le fichier de destination. On remplit  les 4 bloc de 512 octets de 0 et ainsi on supprime la table des partitions
+
+Créer une table des partitions
+Lancer un processus parted en spécifiant l’unité cible : sudo parted /dev/vdb
+On utilise d’abord mklabel pour donner le label gpt à notre disqueOn crée une noufelle partition en précisant son type, puis le début de la partition et sa finen % mkpart ext4 0% 100%
+On utilise ensuite la commande mkfs.ext4 pour formater la partition crée  sudo mkfs.ext4 /dev/[unité]
+
+mount : monter un disque dans une destination. Soit avec l’identifiant de partition (blkid /dev/[unité]) ou avec le nom dans le systeme de fichiers : sudo mount /dev/[unite] /[dest]On vérifie si le montage a eu lieu avec mount sans option + un grep 
+
